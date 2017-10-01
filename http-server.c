@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-const char resp_fmt[] = { "HTTP/1.0 %s\r\nContent-type: text/html\r\n\r\n" };
+const char resp_fmt[] = { "HTTP/1.1 %s\r\nContent-Type: text/html\r\n\r\n" };
 
 int
 main(int argc, char **argv)
@@ -25,7 +25,7 @@ main(int argc, char **argv)
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 
-	if ((ret = getaddrinfo(NULL, "80", &hints, &res))) {
+	if ((ret = getaddrinfo(NULL, "8080", &hints, &res))) {
 		fprintf(stderr, "%s\n", gai_strerror(ret));
 		return 1;
 	}
@@ -54,39 +54,48 @@ main(int argc, char **argv)
 	memset(buf, 0, sizeof buf);
 	while ((client_fd = accept(sock_fd, NULL, NULL)) >= 0) {
 		while ((ret = recv(client_fd, buf, sizeof buf - 1, 0)) > 0) {
-			if ((str_end = strchr(buf, ' '))) {
+			buf[ret] = '\0';
+			fprintf(stderr, "%s", buf);
+			
+			if (strncmp(buf, "GET ", 4) == 0) {
+				req_nam = "index.html";
+				str_beg = strchr(buf, '/') + 1;
+				str_end = strchr(str_beg, ' ');
+				
 				*str_end = '\0';
-				if (strcmp(buf, "GET") == 0) {
-					*str_end = ' ';
-
-					req_nam = "index.html";
-					str_beg = strchr(buf, '/') - 1;
-					str_end = strchr(str_beg, ' ');
-
-					*str_end = '\0';
-
-					if (strlen(str_beg) > 0) {
-						req_nam = str_beg;
-					}
-
-					fprintf(stderr, "requested for file: %s\n", req_nam);
-
-					if ((req_fd = open(req_nam, O_RDONLY)) < 0) {
-						perror("open");
-						return 6;
-					}
-
-					sprintf(buf, resp_fmt, "200 OK");
+				
+				if (strlen(str_beg) > 0) {
+					req_nam = str_beg;
+				}
+				
+				if ((req_fd = open(req_nam, O_RDONLY)) < 0) {
+					sprintf(buf, resp_fmt, "404 Not Found");
 					send(client_fd, buf, strlen(buf), 0);
 
+					if ((req_fd = open("404.html", O_RDONLY)) >= 0) {
+						while ((ret = read(req_fd, buf, sizeof buf))) {
+							send(client_fd, buf, ret, 0);
+						}
+					}
+
+					close(req_fd);
+					
+				} else {
+					sprintf(buf, resp_fmt, "200 OK");
+					send(client_fd, buf, strlen(buf), 0);
+					
 					while ((ret = read(req_fd, buf, sizeof buf))) {
 						send(client_fd, buf, ret, 0);
 					}
 
-				} else {
-					fprintf(stderr, "unknown request: %s\n", buf);
+					close(req_fd);
 				}
+				
+			} else {
+				fprintf(stderr, "unknown request: %s\n", buf);
 			}
+			
+			close(client_fd);
 		}
 	}
 
